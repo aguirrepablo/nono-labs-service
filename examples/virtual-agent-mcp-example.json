@@ -1,0 +1,306 @@
+{
+  "example": "Virtual Agent with MCP Server Configuration",
+  "description": "This example shows how to configure a virtual agent with MCP servers for extended tool capabilities.",
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/virtual-agents",
+      "example": {
+        "name": "Web Inspector Agent",
+        "description": "An intelligent agent that can inspect web applications, analyze performance, and check functionality",
+        "provider": "openai",
+        "model": "gpt-4-turbo",
+        "configParams": {
+          "systemPrompt": "You are a professional web application testing and inspection expert. You can inspect web applications, analyze their performance, check for accessibility issues, and provide detailed reports. Always explain your findings clearly and provide actionable recommendations.",
+          "temperature": 0.7,
+          "maxTokens": 4000,
+          "topP": 0.9,
+          "presencePenalty": 0,
+          "mcpServers": [
+            {
+              "name": "chrome-devtools",
+              "type": "stdio",
+              "command": "npx",
+              "args": ["-y", "chrome-devtools-mcp@latest"],
+              "description": "Allows agents to control Chrome, take screenshots, analyze performance, and inspect web applications"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configParams_schema": {
+    "systemPrompt": {
+      "type": "string",
+      "description": "System prompt that defines agent behavior",
+      "example": "You are a helpful assistant..."
+    },
+    "temperature": {
+      "type": "number",
+      "min": 0,
+      "max": 2,
+      "description": "Controls randomness (0=deterministic, 2=very random)",
+      "default": 0.7
+    },
+    "maxTokens": {
+      "type": "number",
+      "description": "Maximum tokens in response",
+      "example": 2000
+    },
+    "topP": {
+      "type": "number",
+      "min": 0,
+      "max": 1,
+      "description": "Nucleus sampling parameter",
+      "default": 0.9
+    },
+    "presencePenalty": {
+      "type": "number",
+      "min": -2,
+      "max": 2,
+      "description": "Penalizes token repetition",
+      "default": 0
+    },
+    "tools": {
+      "type": "array",
+      "description": "Custom OpenAI function tools",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "enum": ["function"] },
+          "function": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "type": { "type": "string", "enum": ["object"] },
+                  "properties": { "type": "object" },
+                  "required": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "mcpServers": {
+      "type": "array",
+      "description": "MCP servers to connect for extended tool capabilities",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Unique identifier for the MCP server",
+            "example": "chrome-devtools"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["stdio", "http"],
+            "description": "Server transport type"
+          },
+          "command": {
+            "type": "string",
+            "description": "Executable command (for stdio type)",
+            "example": "npx"
+          },
+          "args": {
+            "type": "array",
+            "description": "Command arguments (for stdio type)",
+            "items": { "type": "string" },
+            "example": ["-y", "chrome-devtools-mcp@latest"]
+          },
+          "url": {
+            "type": "string",
+            "description": "Server URL (for http type)",
+            "example": "https://mcp-server.example.com"
+          },
+          "env": {
+            "type": "object",
+            "description": "Environment variables (for stdio type)",
+            "additionalProperties": { "type": "string" },
+            "example": {
+              "API_KEY": "your-api-key",
+              "DEBUG": "true"
+            }
+          }
+        },
+        "required": ["name", "type"]
+      }
+    }
+  },
+  "examples": [
+    {
+      "name": "Chrome DevTools Inspector",
+      "description": "Agent that inspects web applications using Chrome DevTools",
+      "body": {
+        "name": "Chrome Inspector",
+        "provider": "openai",
+        "model": "gpt-4-turbo",
+        "configParams": {
+          "systemPrompt": "You are a web testing expert. Inspect the provided URL and report on performance, accessibility, and functionality.",
+          "temperature": 0.5,
+          "maxTokens": 3000,
+          "mcpServers": [
+            {
+              "name": "chrome-devtools",
+              "type": "stdio",
+              "command": "npx",
+              "args": ["-y", "chrome-devtools-mcp@latest"]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Multi-Tool Agent",
+      "description": "Agent with both custom tools and MCP servers",
+      "body": {
+        "name": "Multi-Tool Agent",
+        "provider": "openai",
+        "model": "gpt-4-turbo",
+        "configParams": {
+          "systemPrompt": "You are a versatile assistant with access to multiple tools.",
+          "temperature": 0.7,
+          "maxTokens": 4000,
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "get_weather",
+                "description": "Get weather information for a location",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "location": { "type": "string" },
+                    "unit": { "type": "string", "enum": ["celsius", "fahrenheit"] }
+                  },
+                  "required": ["location"]
+                }
+              }
+            }
+          ],
+          "mcpServers": [
+            {
+              "name": "chrome-devtools",
+              "type": "stdio",
+              "command": "npx",
+              "args": ["-y", "chrome-devtools-mcp@latest"]
+            },
+            {
+              "name": "github",
+              "type": "http",
+              "url": "https://mcp-github-adapter.example.com"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Custom MCP Server",
+      "description": "Agent using a custom MCP server with environment variables",
+      "body": {
+        "name": "Custom Integration Agent",
+        "provider": "openai",
+        "model": "gpt-4-turbo",
+        "configParams": {
+          "systemPrompt": "You can access our custom internal services.",
+          "temperature": 0.6,
+          "mcpServers": [
+            {
+              "name": "custom-service",
+              "type": "stdio",
+              "command": "node",
+              "args": ["./dist/mcp-server.js"],
+              "env": {
+                "API_KEY": "sk-custom-key",
+                "SERVICE_URL": "https://internal-api.example.com",
+                "LOG_LEVEL": "info"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "flow_example": {
+    "title": "Agent with MCP - Message Flow",
+    "steps": [
+      {
+        "step": 1,
+        "actor": "User",
+        "action": "Send message to agent",
+        "message": "Inspect the performance of https://example.com"
+      },
+      {
+        "step": 2,
+        "actor": "ConversationOrchestratorService",
+        "action": "Route to virtual agent"
+      },
+      {
+        "step": 3,
+        "actor": "OpenAIService.generateChatCompletion()",
+        "action": "Initialize MCP servers",
+        "details": "Connect to chrome-devtools-mcp if not already connected"
+      },
+      {
+        "step": 4,
+        "actor": "OpenAIService",
+        "action": "Prepare tools",
+        "details": "Combine custom tools + MCP tools (mcp_chrome-devtools_*)"
+      },
+      {
+        "step": 5,
+        "actor": "OpenAI API",
+        "action": "Process request",
+        "details": "Model decides to use chrome-devtools tools"
+      },
+      {
+        "step": 6,
+        "actor": "OpenAI API",
+        "action": "Request tool call",
+        "details": "mcp_chrome-devtools_navigate, mcp_chrome-devtools_get_performance_metrics"
+      },
+      {
+        "step": 7,
+        "actor": "OpenAIService.handleToolCall()",
+        "action": "Execute MCP tool",
+        "details": "MCPAdapterService extracts invocation, executes via MCPClientService"
+      },
+      {
+        "step": 8,
+        "actor": "chrome-devtools-mcp",
+        "action": "Execute tool",
+        "details": "Navigate to URL, analyze performance"
+      },
+      {
+        "step": 9,
+        "actor": "OpenAIService",
+        "action": "Process results",
+        "details": "Add tool results to message history"
+      },
+      {
+        "step": 10,
+        "actor": "OpenAI API",
+        "action": "Generate final response",
+        "details": "Model synthesizes findings into user-friendly report"
+      },
+      {
+        "step": 11,
+        "actor": "Agent",
+        "action": "Send response",
+        "message": "Performance report with metrics and recommendations"
+      }
+    ]
+  },
+  "notes": [
+    "MCP servers are initialized on first message if not already connected",
+    "Tool names are automatically prefixed with 'mcp_<serverName>_' in OpenAI calls",
+    "If MCP server initialization fails, agent continues without those tools",
+    "Multiple agents can have different MCP server configurations",
+    "Environment variables in mcpServers should be set securely (not hardcoded in prod)"
+  ]
+}

@@ -5,6 +5,8 @@ import { VirtualAgentsService } from '../virtual-agents/virtual-agents.service';
 import { MessagesService } from '../messages/messages.service';
 import { AuthorRole, MessageType } from '../../schemas/message.schema';
 import { MediaProcessorService } from './media-processor.service';
+import { MCPAdapterService } from './mcp-adapter.service';
+import { MCPManagerService } from './mcp-manager.service';
 import {
   IAIProvider,
   ChatCompletionRequest,
@@ -47,6 +49,8 @@ export class OpenAIService implements IAIProvider {
     private readonly virtualAgentsService: VirtualAgentsService,
     private readonly messagesService: MessagesService,
     private readonly mediaProcessorService: MediaProcessorService,
+    private readonly mcpAdapterService: MCPAdapterService,
+    private readonly mcpManagerService: MCPManagerService,
   ) {}
 
   /**
@@ -242,6 +246,7 @@ export class OpenAIService implements IAIProvider {
 
   /**
    * Generates AI response using OpenAI API
+   * Supports MCP tools configured on the virtual agent
    */
   async generateChatCompletion(
     request: ChatCompletionRequest,
@@ -278,7 +283,10 @@ export class OpenAIService implements IAIProvider {
         `Generating completion for conversation ${conversationId} with ${messages.length} messages using ${agent.model}`,
       );
 
-      // Call OpenAI-compatible API
+      // Prepare tools: combine agent's own tools with MCP tools
+      const allTools = this.prepareChatTools(agent);
+
+      // Call OpenAI-compatible API with tool support
       this.logger.debug(`Messages context: ${JSON.stringify(messages)}`);
 
       const completion = await client.chat.completions.create({
@@ -288,18 +296,67 @@ export class OpenAIService implements IAIProvider {
         max_tokens: agent.configParams?.maxTokens,
         top_p: agent.configParams?.topP,
         presence_penalty: agent.configParams?.presencePenalty,
-        
-        // // --- CAMBIO AQUÍ ---
-        // // functions: agent.configParams?.functions, // <-- Comenta esto (obsoleto)
-        tools: agent.configParams?.tools, // <-- Usa esto
-        // tool_choice: agent.configParams?.tools ? 'auto' : undefined, // <-- Añade esto si usas tools
+        tools: allTools && allTools.length > 0 ? allTools : undefined,
+        tool_choice: allTools && allTools.length > 0 ? 'auto' : undefined,
       });
 
       const choice = completion.choices[0];
       const usage = completion.usage;
 
       // Extract tool_calls if present
-      const toolCalls = (choice.message as any).tool_calls;
+      let toolCalls = (choice.message as any).tool_calls;
+
+      // Handle tool calls in a loop (agentic loop)
+      if (toolCalls && toolCalls.length > 0) {
+        const processedMessages = [...messages];
+        processedMessages.push({
+          role: 'assistant',
+          content: choice.message.content || null,
+          tool_calls: toolCalls,
+        });
+
+        // Process each tool call
+        for (const toolCall of toolCalls) {
+          const toolResult = await this.handleToolCall(
+            toolCall.function.name,
+            toolCall.function.arguments,
+          );
+
+          processedMessages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            name: toolCall.function.name,
+            content: JSON.stringify(toolResult),
+          });
+        }
+
+        // Get final response after tool execution
+        const finalCompletion = await client.chat.completions.create({
+          model: agent.model || this.configService.get('openai.defaultModel'),
+          messages: processedMessages as any,
+          temperature: agent.configParams?.temperature ?? 0.7,
+          max_tokens: agent.configParams?.maxTokens,
+          top_p: agent.configParams?.topP,
+          presence_penalty: agent.configParams?.presencePenalty,
+        });
+
+        const finalChoice = finalCompletion.choices[0];
+        const finalUsage = finalCompletion.usage;
+
+        return {
+          message: {
+            content: finalChoice.message.content || null,
+            toolCalls: undefined, // Final response typically won't have tool calls
+          },
+          finishReason: (finalChoice.finish_reason as 'stop' | 'tool_calls' | 'length' | 'content_filter') || 'stop',
+          model: finalCompletion.model,
+          tokens: {
+            prompt: usage?.prompt_tokens || 0 + (finalUsage?.prompt_tokens || 0),
+            completion: usage?.completion_tokens || 0 + (finalUsage?.completion_tokens || 0),
+            total: (usage?.total_tokens || 0) + (finalUsage?.total_tokens || 0),
+          },
+        };
+      }
 
       return {
         message: {
@@ -330,6 +387,59 @@ export class OpenAIService implements IAIProvider {
       );
       throw new Error(`Failed to generate AI response: ${error.message}`);
     }
+  }
+
+  /**
+   * Prepare tools for OpenAI API call
+   * Includes agent's own tools + MCP tools
+   * MCP tools are obtained from MCPManagerService (globally configured servers)
+   */
+  private prepareChatTools(agent: any): any[] {
+    const tools: any[] = [];
+
+    // Add agent's own tools if configured
+    if (agent.configParams?.tools && agent.configParams.tools.length > 0) {
+      tools.push(...agent.configParams.tools);
+    }
+
+    // Add MCP tools if agent specifies which servers to use
+    if (agent.configParams?.mcpServerNames && agent.configParams.mcpServerNames.length > 0) {
+      const mcpTools = this.mcpAdapterService.getAllToolsAsOpenAIFormat(
+        agent.configParams.mcpServerNames,
+      );
+      tools.push(...mcpTools);
+
+      this.logger.debug(
+        `Agent configured with MCP servers: ${agent.configParams.mcpServerNames.join(', ')}`,
+      );
+    }
+
+    return tools;
+  }
+
+  /**
+   * Handle tool call - either MCP tool or regular function
+   */
+  private async handleToolCall(
+    toolName: string,
+    toolArguments: string,
+  ): Promise<any> {
+    // Check if it's an MCP tool call
+    if (this.mcpAdapterService.isMCPToolCall(toolName)) {
+      const invocation = this.mcpAdapterService.extractMCPInvocation(
+        toolName,
+        toolArguments,
+      );
+
+      if (invocation) {
+        return await this.mcpAdapterService.executeMCPInvocation(invocation);
+      }
+    }
+
+    // For non-MCP tools, return placeholder
+    // In production, you'd implement custom tool execution here
+    this.logger.warn(`Unknown tool: ${toolName}`);
+    return { error: `Tool ${toolName} not found` };
   }
 
   /**
